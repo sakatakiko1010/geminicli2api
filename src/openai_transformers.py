@@ -109,13 +109,14 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
     if is_search_model(openai_request.model):
         request_payload["tools"] = [{"googleSearch": {}}]
     
-    # Add thinking configuration for thinking models
-    thinking_budget = get_thinking_budget(openai_request.model)
-    if thinking_budget is not None:
-        request_payload["generationConfig"]["thinkingConfig"] = {
-            "thinkingBudget": thinking_budget,
-            "includeThoughts": should_include_thoughts(openai_request.model)
-        }
+    if "gemini-2.5-flash-image" not in openai_request.model:
+        # Add thinking configuration for thinking models
+        thinking_budget = get_thinking_budget(openai_request.model)
+        if thinking_budget is not None:
+            request_payload["generationConfig"]["thinkingConfig"] = {
+                "thinkingBudget": thinking_budget,
+                "includeThoughts": should_include_thoughts(openai_request.model)
+            }
     
     return request_payload
 

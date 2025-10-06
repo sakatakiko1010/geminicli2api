@@ -114,6 +114,19 @@ BASE_MODELS = [
         "maxTemperature": 2.0,
         "topP": 0.95,
         "topK": 64
+    },
+    {
+        "name": "models/gemini-2.5-flash-image-preview",
+        "version": "001",
+        "displayName": "Gemini 2.5 Flash Image Preview",
+        "description": "Gemini 2.5 Flash Image Preview",
+        "inputTokenLimit": 32768,
+        "outputTokenLimit": 32768,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "temperature": 1.0,
+        "maxTemperature": 2.0,
+        "topP": 0.95,
+        "topK": 64
     }
 ]
 
