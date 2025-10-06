@@ -5,6 +5,7 @@ This module contains all the logic for transforming requests and responses betwe
 import json
 import time
 import uuid
+import re
 from typing import Dict, Any
 
 from .models import OpenAIChatCompletionRequest, OpenAIChatCompletionResponse
@@ -44,7 +45,47 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
             parts = []
             for part in message.content:
                 if part.get("type") == "text":
-                    parts.append({"text": part.get("text", "")})
+                    text_value = part.get("text", "") or ""
+                    # Extract Markdown images (data URIs) into inline image parts, preserving surrounding text
+                    pattern = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
+                    matches = list(pattern.finditer(text_value))
+                    if not matches:
+                        parts.append({"text": text_value})
+                    else:
+                        last_idx = 0
+                        for m in matches:
+                            url = m.group(1).strip().strip('"').strip("'")
+                            # Emit text before the image
+                            if m.start() > last_idx:
+                                before = text_value[last_idx:m.start()]
+                                if before:
+                                    parts.append({"text": before})
+                            # Handle data URI images: data:image/png;base64,xxxx
+                            if url.startswith("data:"):
+                                try:
+                                    header, base64_data = url.split(",", 1)
+                                    # header looks like: data:image/png;base64
+                                    mime_type = "image/png"
+                                    if ":" in header:
+                                        mime_type = header.split(":", 1)[1].split(";", 1)[0] or "image/png"
+                                    parts.append({
+                                        "inlineData": {
+                                            "mimeType": mime_type,
+                                            "data": base64_data
+                                        }
+                                    })
+                                except Exception:
+                                    # Fallback: keep original markdown as text if parsing fails
+                                    parts.append({"text": text_value[m.start():m.end()]})
+                            else:
+                                # Non-data URIs: keep markdown as text (cannot inline without fetching)
+                                parts.append({"text": text_value[m.start():m.end()]})
+                            last_idx = m.end()
+                        # Tail text after last image
+                        if last_idx < len(text_value):
+                            tail = text_value[last_idx:]
+                            if tail:
+                                parts.append({"text": tail})
                 elif part.get("type") == "image_url":
                     image_url = part.get("image_url", {}).get("url")
                     if image_url:
@@ -63,8 +104,46 @@ def openai_request_to_gemini(openai_request: OpenAIChatCompletionRequest) -> Dic
                             continue
             contents.append({"role": role, "parts": parts})
         else:
-            # Simple text content
-            contents.append({"role": role, "parts": [{"text": message.content}]})
+            # Simple text content; extract Markdown images (data URIs) into inline image parts
+            text = message.content or ""
+            parts = []
+            # Convert Markdown images: ![alt](data:<mimeType>;base64,<data>)
+            pattern = re.compile(r'!\[[^\]]*\]\(([^)]+)\)')
+            last_idx = 0
+            for m in pattern.finditer(text):
+                url = m.group(1).strip().strip('"').strip("'")
+                # Emit text before the image
+                if m.start() > last_idx:
+                    before = text[last_idx:m.start()]
+                    if before:
+                        parts.append({"text": before})
+                # Handle data URI images: data:image/png;base64,xxxx
+                if url.startswith("data:"):
+                    try:
+                        header, base64_data = url.split(",", 1)
+                        # header looks like: data:image/png;base64
+                        mime_type = "image/png"
+                        if ":" in header:
+                            mime_type = header.split(":", 1)[1].split(";", 1)[0] or "image/png"
+                        parts.append({
+                            "inlineData": {
+                                "mimeType": mime_type,
+                                "data": base64_data
+                            }
+                        })
+                    except Exception:
+                        # Fallback: keep original markdown as text if parsing fails
+                        parts.append({"text": text[m.start():m.end()]})
+                else:
+                    # Non-data URIs: keep markdown as text (cannot inline without fetching)
+                    parts.append({"text": text[m.start():m.end()]})
+                last_idx = m.end()
+            # Tail text after last image
+            if last_idx < len(text):
+                tail = text[last_idx:]
+                if tail:
+                    parts.append({"text": tail})
+            contents.append({"role": role, "parts": parts if parts else [{"text": text}]})
     
     # Map OpenAI generation parameters to Gemini format
     generation_config = {}
@@ -145,18 +224,28 @@ def gemini_response_to_openai(gemini_response: Dict[str, Any], model: str) -> Di
         
         # Extract and separate thinking tokens from regular content
         parts = candidate.get("content", {}).get("parts", [])
-        content = ""
+        content_parts = []
         reasoning_content = ""
         
         for part in parts:
-            if not part.get("text"):
+            # Text parts (may include thinking tokens)
+            if part.get("text") is not None:
+                if part.get("thought", False):
+                    reasoning_content += part.get("text", "")
+                else:
+                    content_parts.append(part.get("text", ""))
                 continue
-            
-            # Check if this part contains thinking tokens
-            if part.get("thought", False):
-                reasoning_content += part.get("text", "")
-            else:
-                content += part.get("text", "")
+
+            # Inline image data -> embed as Markdown data URI
+            inline = part.get("inlineData")
+            if inline and inline.get("data"):
+                mime = inline.get("mimeType") or "image/png"
+                if isinstance(mime, str) and mime.startswith("image/"):
+                    data_b64 = inline.get("data")
+                    content_parts.append(f"![image](data:{mime};base64,{data_b64})")
+                continue
+
+        content = "\n\n".join([p for p in content_parts if p is not None])
         
         # Build message object
         message = {
@@ -206,18 +295,28 @@ def gemini_stream_chunk_to_openai(gemini_chunk: Dict[str, Any], model: str, resp
         
         # Extract and separate thinking tokens from regular content
         parts = candidate.get("content", {}).get("parts", [])
-        content = ""
+        content_parts = []
         reasoning_content = ""
         
         for part in parts:
-            if not part.get("text"):
+            # Text parts (may include thinking tokens)
+            if part.get("text") is not None:
+                if part.get("thought", False):
+                    reasoning_content += part.get("text", "")
+                else:
+                    content_parts.append(part.get("text", ""))
                 continue
-            
-            # Check if this part contains thinking tokens
-            if part.get("thought", False):
-                reasoning_content += part.get("text", "")
-            else:
-                content += part.get("text", "")
+
+            # Inline image data -> embed as Markdown data URI
+            inline = part.get("inlineData")
+            if inline and inline.get("data"):
+                mime = inline.get("mimeType") or "image/png"
+                if isinstance(mime, str) and mime.startswith("image/"):
+                    data_b64 = inline.get("data")
+                    content_parts.append(f"![image](data:{mime};base64,{data_b64})")
+                continue
+
+        content = "\n\n".join([p for p in content_parts if p is not None])
         
         # Build delta object
         delta = {}
