@@ -43,6 +43,19 @@ DEFAULT_SAFETY_SETTINGS = [
 # Base Models (without search variants)
 BASE_MODELS = [
     {
+        "name": "models/gemini-2.5-pro-preview-03-25",
+        "version": "001",
+        "displayName": "Gemini 2.5 Pro Preview 03-25",
+        "description": "Preview version of Gemini 2.5 Pro from May 6th",
+        "inputTokenLimit": 1048576,
+        "outputTokenLimit": 65535,
+        "supportedGenerationMethods": ["generateContent", "streamGenerateContent"],
+        "temperature": 1.0,
+        "maxTemperature": 2.0,
+        "topP": 0.95,
+        "topK": 64
+    },
+    {
         "name": "models/gemini-2.5-pro-preview-05-06",
         "version": "001",
         "displayName": "Gemini 2.5 Pro Preview 05-06",
