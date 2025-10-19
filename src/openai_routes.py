@@ -208,18 +208,7 @@ async def openai_chat_completions(
                 # Parse Gemini response and transform to OpenAI format
                 gemini_response = json.loads(response.body)
                 openai_response = gemini_response_to_openai(gemini_response, request.model)
-
-                # 🔍 Remove internal thinking process if present
-if isinstance(openai_response, dict):
-    try:
-        content = openai_response.get("choices", [{}])[0].get("message", {}).get("content", "")
-        if "Thinking Process:" in content:
-            # Remove everything from "Thinking Process:" onwards
-            cleaned = content.split("Thinking Process:")[0].strip()
-            openai_response["choices"][0]["message"]["content"] = cleaned
-    except Exception as e:
-        logging.warning(f"Failed to clean thinking process: {str(e)}")
-
+                
                 logging.info(f"Successfully processed non-streaming response for model: {request.model}")
                 return openai_response
                 
